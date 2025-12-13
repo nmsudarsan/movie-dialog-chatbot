@@ -19,13 +19,14 @@ MODEL_PATH = INDEX_DIR / "model_name.txt"
 
 
 def ensure_index_present():
-    """
-    Ensures FAISS index + metadata exist locally.
-    If missing, downloads index_bundle.zip from Hugging Face and extracts it.
-    """
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
-    if INDEX_PATH.exists() and META_PATH.exists() and MODEL_PATH.exists():
+    index_path = INDEX_DIR / "faiss.index"
+    meta_path = INDEX_DIR / "meta.parquet"
+    model_path = INDEX_DIR / "model_name.txt"
+
+    # Already present → nothing to do
+    if index_path.exists() and meta_path.exists() and model_path.exists():
         return
 
     st.info("Downloading prebuilt search index (one-time setup)...")
@@ -39,16 +40,21 @@ def ensure_index_present():
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(INDEX_DIR)
 
-    # After extraction we expect:
-    # data/index/faiss.index
-    # data/index/meta.parquet
-    # data/index/model_name.txt
-    if not (INDEX_PATH.exists() and META_PATH.exists() and MODEL_PATH.exists()):
+    # 🔍 Handle possible nested folder inside ZIP
+    nested_dir = INDEX_DIR / "index"
+    if nested_dir.exists():
+        for f in nested_dir.iterdir():
+            f.replace(INDEX_DIR / f.name)
+        nested_dir.rmdir()
+
+    # Final validation
+    if not (index_path.exists() and meta_path.exists() and model_path.exists()):
         st.error("Downloaded zip, but expected index files were not found after extraction.")
         st.stop()
 
-    st.success("Index downloaded and ready. Reloading app...")
+    st.success("Index ready. Reloading app...")
     st.rerun()
+
 
 
 @st.cache_resource
