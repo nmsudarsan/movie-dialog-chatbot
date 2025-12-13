@@ -10,8 +10,6 @@ from convokit import Corpus, download
 
 INDEX_DIR = Path("data/index")
 
-# --- Basic safety check so the app doesn't crash if index wasn't built yet ---
-
 DATA_DIR = Path("data")
 PROCESSED_DIR = DATA_DIR / "processed"
 
@@ -95,6 +93,9 @@ def build_index(max_rows: int = 50000, batch_size: int = 256):
             total += len(texts_batch)
 
         df = pd.DataFrame(rows_meta)
+
+        if index is None:
+            raise RuntimeError("Index build failed: no embeddings were generated.")
 
         faiss.write_index(index, str(INDEX_DIR / "faiss.index"))
         df.to_parquet(INDEX_DIR / "meta.parquet", index=False)
