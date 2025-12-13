@@ -3,6 +3,7 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 import faiss
 from pathlib import Path
+from convokit import Corpus, download
 
 
 
@@ -10,7 +11,6 @@ from pathlib import Path
 INDEX_DIR = Path("data/index")
 
 # --- Basic safety check so the app doesn't crash if index wasn't built yet ---
-from convokit import Corpus, download
 
 DATA_DIR = Path("data")
 PROCESSED_DIR = DATA_DIR / "processed"
