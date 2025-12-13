@@ -3,131 +3,80 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 import faiss
 from pathlib import Path
-from convokit import Corpus, download
+from huggingface_hub import hf_hub_download
+import zipfile
+
+# =========================
+# Config
+# =========================
+HF_REPO_ID = "NMSudarsan/movie-dialog-index"   # your HF dataset repo
+HF_FILENAME = "index_bundle.zip"              # file inside that repo
+
+INDEX_DIR = Path("data/index")                # where we store extracted index
+INDEX_PATH = INDEX_DIR / "faiss.index"
+META_PATH = INDEX_DIR / "meta.parquet"
+MODEL_PATH = INDEX_DIR / "model_name.txt"
 
 
+def ensure_index_present():
+    """
+    Ensures FAISS index + metadata exist locally.
+    If missing, downloads index_bundle.zip from Hugging Face and extracts it.
+    """
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
+    if INDEX_PATH.exists() and META_PATH.exists() and MODEL_PATH.exists():
+        return
 
-INDEX_DIR = Path("data/index")
+    st.info("Downloading prebuilt search index (one-time setup)...")
 
-DATA_DIR = Path("data")
-PROCESSED_DIR = DATA_DIR / "processed"
+    zip_path = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename=HF_FILENAME,
+        repo_type="dataset",
+    )
 
-def build_index(max_rows: int = 50000, batch_size: int = 256):
-    try:
-        if (INDEX_DIR / "faiss.index").exists():
-            st.info("Index already exists. Skipping build.")
-            return
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(INDEX_DIR)
 
-        st.info("Downloading and building index (batched). This may take a few minutes...")
+    # After extraction we expect:
+    # data/index/faiss.index
+    # data/index/meta.parquet
+    # data/index/model_name.txt
+    if not (INDEX_PATH.exists() and META_PATH.exists() and MODEL_PATH.exists()):
+        st.error("Downloaded zip, but expected index files were not found after extraction.")
+        st.stop()
 
-        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-        INDEX_DIR.mkdir(parents=True, exist_ok=True)
-
-        corpus = Corpus(filename=download("movie-corpus"))
-
-        model_name = "sentence-transformers/all-MiniLM-L6-v2"
-        model = SentenceTransformer(model_name)
-
-        rows_meta = []
-        texts_batch = []
-        meta_batch = []
-
-        index = None
-        total = 0
-
-        prog = st.progress(0, text="Encoding utterances...")
-
-        for utt in corpus.iter_utterances():
-            conv = corpus.get_conversation(utt.conversation_id)
-
-            meta = {
-                "utterance_id": utt.id,
-                "conversation_id": utt.conversation_id,
-                "speaker": utt.speaker.id if utt.speaker else None,
-                "text": utt.text,
-                "movie": conv.meta.get("movie_name"),
-                "year": conv.meta.get("release_year"),
-                "genre": conv.meta.get("genre"),
-                "rating": conv.meta.get("rating"),
-                "votes": conv.meta.get("votes"),
-            }
-
-            texts_batch.append(str(utt.text))
-            meta_batch.append(meta)
-
-            if len(texts_batch) >= batch_size:
-                emb = model.encode(
-                    texts_batch,
-                    convert_to_numpy=True,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                ).astype("float32")
-
-                if index is None:
-                    index = faiss.IndexFlatIP(emb.shape[1])
-
-                index.add(emb)
-                rows_meta.extend(meta_batch)
-
-                total += len(texts_batch)
-                texts_batch, meta_batch = [], []
-
-                prog.progress(min(total / max_rows, 1.0), text=f"Encoded {total:,} / {max_rows:,} utterances...")
-
-                if total >= max_rows:
-                    break
-
-        # flush remaining
-        if texts_batch:
-            emb = model.encode(
-                texts_batch,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-            ).astype("float32")
-            if index is None:
-                index = faiss.IndexFlatIP(emb.shape[1])
-            index.add(emb)
-            rows_meta.extend(meta_batch)
-            total += len(texts_batch)
-
-        df = pd.DataFrame(rows_meta)
-
-        if index is None:
-            raise RuntimeError("Index build failed: no embeddings were generated.")
-
-        faiss.write_index(index, str(INDEX_DIR / "faiss.index"))
-        df.to_parquet(INDEX_DIR / "meta.parquet", index=False)
-        (INDEX_DIR / "model_name.txt").write_text(model_name, encoding="utf-8")
-
-        st.success(f"Index built successfully with {total:,} utterances!")
-        st.rerun()
-
-    except Exception as e:
-        st.error("Index build failed. See error below:")
-        st.exception(e)
-        raise
-
-
-
+    st.success("Index downloaded and ready. Reloading app...")
+    st.rerun()
 
 
 @st.cache_resource
 def load_assets():
-    index = faiss.read_index(str(INDEX_DIR / "faiss.index"))
-    meta = pd.read_parquet(INDEX_DIR / "meta.parquet")
-    model_name = (INDEX_DIR / "model_name.txt").read_text(encoding="utf-8").strip()
+    """
+    Load FAISS index + metadata + embedding model.
+    Cached across reruns for performance.
+    """
+    index = faiss.read_index(str(INDEX_PATH))
+    meta = pd.read_parquet(META_PATH)
+    model_name = MODEL_PATH.read_text(encoding="utf-8").strip()
     model = SentenceTransformer(model_name)
     return index, meta, model
 
+
 def search(query: str, k: int = 8) -> pd.DataFrame:
     index, meta, model = load_assets()
-    q_emb = model.encode([query], normalize_embeddings=True, convert_to_numpy=True).astype("float32")
+    q_emb = model.encode(
+        [query],
+        normalize_embeddings=True,
+        convert_to_numpy=True
+    ).astype("float32")
+
     scores, idxs = index.search(q_emb, k)
     results = meta.iloc[idxs[0]].copy()
     results.insert(0, "score", scores[0])
-    return results
+    return results.sort_values("score", ascending=False)
+
 
 def summarize_results(query: str, filtered: pd.DataFrame) -> str:
     top_movies = filtered["movie"].head(3).tolist()
@@ -142,16 +91,16 @@ def summarize_results(query: str, filtered: pd.DataFrame) -> str:
     movie_str = ", ".join(unique_movies)
     return f"Your query relates to: **{query}**. Top grounded matches come from: **{movie_str}**."
 
-# --- UI ---
+
+# =========================
+# UI
+# =========================
 st.set_page_config(page_title="Movie Dialog QA Bot", page_icon="🎬", layout="wide")
 st.title("🎬 Movie Dialog QA Bot")
 st.caption("Ask questions about movie dialog. Results are grounded in the Cornell Movie Dialog corpus (via ConvoKit).")
 
-if not (INDEX_DIR / "faiss.index").exists():
-    st.warning("Search index not found.")
-    if st.button("Build index (one-time setup)"):
-        build_index(max_rows=50000, batch_size=128)
-    st.stop()
+# ✅ Ensure index exists (downloads from HF if missing)
+ensure_index_present()
 
 with st.sidebar:
     st.header("Settings")
@@ -179,27 +128,24 @@ if query:
 
     # Retrieve
     results = search(query, k=k)
-    filtered = results[results["score"] >= min_score].sort_values("score", ascending=False)
-
-    response_md = ""
+    filtered = results[results["score"] >= min_score].copy()
 
     with st.chat_message("assistant"):
         if filtered.empty:
-            response_md = (
+            assistant_md = (
                 "I couldn’t find a confident match in the dataset for that question. "
                 "Try rephrasing or using a more specific keyword."
             )
-            st.markdown(response_md)
+            st.markdown(assistant_md)
         else:
-            response_md += "### Answer (grounded)\n"
-            response_md += summarize_results(query, filtered) + "\n\n"
-            response_md += "### Evidence (top matches)\n"
+            assistant_md = "### Answer (grounded)\n"
+            assistant_md += summarize_results(query, filtered) + "\n\n"
+            assistant_md += "### Evidence (top matches)\n"
 
             st.markdown("### Answer (grounded)")
             st.markdown(summarize_results(query, filtered))
             st.markdown("### Evidence (top matches)")
 
-            # Show evidence in expanders (nice UX)
             for _, row in filtered.iterrows():
                 label = f"{row['movie']} ({row['year']}) • score {row['score']:.3f}"
                 with st.expander(label, expanded=False):
@@ -207,5 +153,5 @@ if query:
                     st.write(f"**Conversation:** {row['conversation_id']}  |  **Utterance:** {row['utterance_id']}")
                     st.markdown(f"> {row['text']}")
 
-    # store assistant response (so history is consistent on reruns)
-    st.session_state.messages.append({"role": "assistant", "content": response_md})
+    # store assistant response for chat history
+    st.session_state.messages.append({"role": "assistant", "content": assistant_md})
