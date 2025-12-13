@@ -4,14 +4,71 @@ from sentence_transformers import SentenceTransformer
 import faiss
 from pathlib import Path
 
+
+
+
 INDEX_DIR = Path("data/index")
 
 # --- Basic safety check so the app doesn't crash if index wasn't built yet ---
-if not (INDEX_DIR / "faiss.index").exists():
-    st.set_page_config(page_title="Movie Dialog QA Bot", page_icon="🎬", layout="wide")
-    st.title("🎬 Movie Dialog QA Bot")
-    st.error("Vector index not found. Please run: `python src/04_build_vector_index.py`")
-    st.stop()
+from convokit import Corpus, download
+
+DATA_DIR = Path("data")
+PROCESSED_DIR = DATA_DIR / "processed"
+
+def build_index():
+    
+    if (INDEX_DIR / "faiss.index").exists():
+        st.info("Index already exists. Skipping build.")
+        return
+
+    st.info("Downloading and building index. This may take a few minutes...")
+
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+    corpus = Corpus(filename=download("movie-corpus"))
+
+    rows = []
+    for utt in corpus.iter_utterances():
+        conv = corpus.get_conversation(utt.conversation_id)
+        rows.append({
+            "utterance_id": utt.id,
+            "conversation_id": utt.conversation_id,
+            "speaker": utt.speaker.id if utt.speaker else None,
+            "text": utt.text,
+            "movie": conv.meta.get("movie_name"),
+            "year": conv.meta.get("release_year"),
+            "genre": conv.meta.get("genre"),
+            "rating": conv.meta.get("rating"),
+            "votes": conv.meta.get("votes"),
+        })
+
+    df = pd.DataFrame(rows)
+    df.to_parquet(PROCESSED_DIR / "utterances.parquet", index=False)
+
+    model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    model = SentenceTransformer(model_name)
+
+    embeddings = model.encode(
+        df["text"].astype(str).tolist(),
+        batch_size=128,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    ).astype("float32")
+
+    index = faiss.IndexFlatIP(embeddings.shape[1])
+    index.add(embeddings)
+
+    faiss.write_index(index, str(INDEX_DIR / "faiss.index"))
+    df.to_parquet(INDEX_DIR / "meta.parquet", index=False)
+    (INDEX_DIR / "model_name.txt").write_text(model_name)
+
+    st.success("Index built successfully! Loading search...")
+    st.rerun()
+
+
+
 
 @st.cache_resource
 def load_assets():
@@ -46,6 +103,12 @@ def summarize_results(query: str, filtered: pd.DataFrame) -> str:
 st.set_page_config(page_title="Movie Dialog QA Bot", page_icon="🎬", layout="wide")
 st.title("🎬 Movie Dialog QA Bot")
 st.caption("Ask questions about movie dialog. Results are grounded in the Cornell Movie Dialog corpus (via ConvoKit).")
+
+if not (INDEX_DIR / "faiss.index").exists():
+    st.warning("Search index not found.")
+    if st.button("Build index (one-time setup)"):
+        build_index()
+    st.stop()
 
 with st.sidebar:
     st.header("Settings")
