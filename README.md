@@ -42,9 +42,9 @@ pip install -r requirements.txt
 
 Run these once:
 
-python src/02_download_with_convokit.py
-python src/03_build_utterances_table.py
-python src/04_build_vector_index.py
+- python src/02_download_with_convokit.py
+- python src/03_build_utterances_table.py
+- python src/04_build_vector_index.py
 
 ## Run the app
 python -m streamlit run app.py
