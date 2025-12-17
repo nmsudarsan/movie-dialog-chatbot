@@ -50,9 +50,9 @@ python -m streamlit run app.py
 ## Developer: rebuild the index locally (optional)
 If you want to regenerate the FAISS index yourself:
 
-python src/02_download_with_convokit.py
-python src/03_build_utterances_table.py
-python src/04_build_vector_index.py
+- python src/02_download_with_convokit.py
+- python src/03_build_utterances_table.py
+- python src/04_build_vector_index.py
 
 ## Notes
 
