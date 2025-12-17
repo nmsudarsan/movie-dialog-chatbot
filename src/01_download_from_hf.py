@@ -9,7 +9,7 @@ def main():
         repo_id="cornell-movie-dialog/cornell_movie_dialog",
         repo_type="dataset",
         local_dir=out_dir,
-        local_dir_use_symlinks=False,  # good for Windows
+        local_dir_use_symlinks=False,  
     )
 
     print("Downloaded to:", local_path)

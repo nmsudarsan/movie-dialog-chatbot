@@ -25,7 +25,6 @@ def ensure_index_present():
     meta_path = INDEX_DIR / "meta.parquet"
     model_path = INDEX_DIR / "model_name.txt"
 
-    # Already present → nothing to do
     if index_path.exists() and meta_path.exists() and model_path.exists():
         return
 
@@ -40,7 +39,7 @@ def ensure_index_present():
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(INDEX_DIR)
 
-    # 🔍 Handle possible nested folder inside ZIP
+    # Handle possible nested folder inside ZIP
     nested_dir = INDEX_DIR / "index"
     if nested_dir.exists():
         for f in nested_dir.iterdir():
@@ -105,7 +104,7 @@ st.set_page_config(page_title="Movie Dialog QA Bot", page_icon="🎬", layout="w
 st.title("🎬 Movie Dialog QA Bot")
 st.caption("Ask questions about movie dialog. Results are grounded in the Cornell Movie Dialog corpus (via ConvoKit).")
 
-# ✅ Ensure index exists (downloads from HF if missing)
+# Ensure index exists (downloads from HF if missing)
 ensure_index_present()
 
 with st.sidebar:
