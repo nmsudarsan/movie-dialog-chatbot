@@ -155,7 +155,8 @@ if query:
             for _, row in filtered.iterrows():
                 label = f"{row['movie']} ({row['year']}) • score {row['score']:.3f}"
                 with st.expander(label, expanded=False):
-                    st.write(f"**Speaker:** {row['speaker']}")
+                    speaker_display = row.get("character_name") or row.get("speaker") or row.get("speaker_id") or "Unknown"
+                    st.write(f"**Speaker:** {speaker_display}")
                     st.write(f"**Conversation:** {row['conversation_id']}  |  **Utterance:** {row['utterance_id']}")
                     st.markdown(f"> {row['text']}")
 

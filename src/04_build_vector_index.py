@@ -37,15 +37,17 @@ def main():
 
     # Save metadata needed for lookup
     meta_cols = [
-        "utterance_id",
-        "conversation_id",
-        "speaker",
-        "movie",
-        "year",
-        "genre",
-        "rating",
-        "votes",
-        "text",
+    "utterance_id",
+    "conversation_id",
+    "speaker",         
+    "speaker_id",      
+    "character_name",  
+    "movie",
+    "year",
+    "genre",
+    "rating",
+    "votes",
+    "text",
     ]
     df[meta_cols].to_parquet(INDEX_DIR / "meta.parquet", index=False)
 
